@@ -356,7 +356,7 @@ def dataframe_to_rdmol(filtered_atom_df, mol_name):
 
     # Set the _Name property for the molecule
     rdmol.SetProp("_Name", mol_name)
-    
+    Chem.SanitizeMol(mol)
     return rdmol
 
 def dataframe_to_rdmol_bond_order(filtered_atom_df, pair_df,mol_name):
