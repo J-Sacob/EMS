@@ -8,6 +8,7 @@ from rdkit.Chem.rdDetermineBonds import DetermineBonds
 from rdkit.Chem.rdchem import BondType
 
 from EMS.utils.lattice import frac_to_cart
+from EMS.utils.periodic_table import Get_periodic_table
 
 
 ########### Set up the logger system ###########
@@ -561,6 +562,13 @@ def cif_to_rdmol(file_path):
     Args:
     - file_path (str): The path to the cif file.
     '''
+    try:
+        from pymatgen.core import Structure
+        from pymatgen.analysis.graphs import StructureGraph
+        from pymatgen.analysis.local_env import JmolNN
+        from pymatgen.io.cif import CifParser
+    except:
+         logger.error(f"Pymatgen needed to be installed to use function cif_to_rdmol")
 
     with open(file_path, 'r') as f:
         # Read the lines in the cif file and check whether the file includes molecule information
@@ -682,36 +690,116 @@ def cif_to_rdmol(file_path):
     if None in cell_params.values():
         logger.error(f"Invalid cif file: {file_path}. Incomplete cell parameters.")
         raise ValueError(f"Invalid cif file: {file_path}. Incomplete cell parameters.")
-
-    xyz_array = np.array(list(zip(x_list, y_list, z_list)))
-    cart_xyz_array = frac_to_cart(xyz_array, cell_params['a'], cell_params['b'], cell_params['c'],
-                                  cell_params['alpha'], cell_params['beta'], cell_params['gamma'])
-    cart_x_list = cart_xyz_array[:, 0].tolist()
-    cart_y_list = cart_xyz_array[:, 1].tolist()
-    cart_z_list = cart_xyz_array[:, 2].tolist()
-
-    # Create an RDKit molecule object and add atoms and bonds to the molecule
-    mol = Chem.RWMol()
-    conf = Chem.Conformer(len(atom_type_list))
-
-    for atom_type, x, y, z in zip(atom_type_list, cart_x_list, cart_y_list, cart_z_list):
-        rd_atom = Chem.Atom(atom_type)
-        idx = mol.AddAtom(rd_atom)
-        conf.SetAtomPosition(idx, (x, y, z))
-
-    mol.AddConformer(conf)
-
-    # Determine and add bonds in the molecule
-    try:
-        DetermineBonds(mol)
-    except Exception as e:
-        logger.error(f"Fail to determine the bonds by the DetermineBonds function for the cif file: {file_path}")
-        raise e
     
-    # Get the RDKit Mol object.
-    mol = mol.GetMol()
+    # read CIF without applying symmetry - CIF file must not contain any solid state shifts
+    parser = CifParser(file_path, occupancy_tolerance=100)
+    raw = list(parser._cif.data.values())[0]
 
-    return mol
+    # Extract fractional coordinates in CIF order
+    labels = raw["_atom_site_label"]
+    species = raw["_atom_site_type_symbol"]
+    fract_x = raw["_atom_site_fract_x"]
+    fract_y = raw["_atom_site_fract_y"]
+    fract_z = raw["_atom_site_fract_z"]
+
+    # get the lattice vectors from the CIF
+    structure_full = parser.get_structures(primitive=False, symmetrized=False)[0]
+    # converts lattice parameters in CIF file to a Lattice object
+    lattice = structure_full.lattice 
+
+    # build a list of sites 
+    # sites = a list of atoms and fractional coordinates ordered like the CIF file
+    sites = []
+    valid_elements = set(Get_periodic_table().values())
+
+    for lbl, sp, x, y, z in zip(labels, species, fract_x, fract_y, fract_z):
+        try:
+            if sp in valid_elements:
+                sites.append([sp, float(x), float(y), float(z)])
+        except ValueError:
+            pass
+        continue   
+
+    # build final pymatgen structure - use the lattice object with lattice parameters we built earlier 
+    custom_structure = Structure(lattice, 
+                             [s[0] for s in sites], 
+                             [s[1:] for s in sites],
+                             validate_proximity=False,
+                             to_unit_cell=False,
+                             coords_are_cartesian=False)
+
+    sg = StructureGraph.with_local_env_strategy(custom_structure, JmolNN())
+    molecules = sg.get_subgraphs_as_molecules()
+
+    # look at subgraphs - may have 2 seperate molecules
+
+    rdkit_mols = []
+
+    for pymatgen_mol in molecules:
+        atom_types = [site.species_string for site in pymatgen_mol.sites]
+        coords = [site.coords for site in pymatgen_mol.sites]
+
+        rwmol = Chem.RWMol()
+        conf = Chem.Conformer(len(atom_types))
+
+        for i, (atom_type, xyz) in enumerate(zip(atom_types, coords)):
+            a = Chem.Atom(atom_type)
+            idx = rwmol.AddAtom(a)
+            conf.SetAtomPosition(idx, xyz)
+
+        rwmol.AddConformer(conf)
+        DetermineBonds(rwmol)
+        rdkit_mols.append(rwmol.GetMol())
+
+
+    return rwmol
+
+
+
+    # ###### use molecule (a list of unique molecules in unit cell and call the Molecules object from pymatgen and remove charge from molecule so that rdkit DetermineBonds can work)
+
+    # mol_frac_coords_list = []
+    # mol_atoms = []
+
+    # for i, mol in enumerate(molecules):
+    #     for site in mol.sites:
+    #         mol_frac_coords_list.append(site.coords)
+    #         mol_atoms.append(site.species_string)
+    # atom_type_list = mol_atoms
+
+    # xyz_array = np.array(mol_frac_coords_list)
+    # cart_x_list = xyz_array[:, 0].tolist()
+    # cart_y_list = xyz_array[:, 1].tolist()
+    # cart_z_list = xyz_array[:, 2].tolist()
+
+    # # Create an RDKit molecule object and add atoms and bonds to the molecule
+    # mol = Chem.RWMol()
+    # conf = Chem.Conformer(len(atom_type_list))
+    # positions = np.array([list(conf.GetAtomPosition(i)) for i in range(conf.GetNumAtoms())])
+
+
+    # #rdkit is using atom indicies from cif which is not compatible with pymatgen Structure object - get atom types and indicies from pymatgen
+    # for atom_type, x, y, z in zip(atom_type_list, cart_x_list, cart_y_list, cart_z_list):
+    #     rd_atom = Chem.Atom(atom_type)
+    #     idx = mol.AddAtom(rd_atom)
+    #     print(idx)
+    #     conf.SetAtomPosition(idx, (x, y, z))
+    #     print(x, y, z)
+    #     print(atom_type)
+
+    # mol.AddConformer(conf)
+
+    # #Determine and add bonds in the molecule
+    # try:
+    #     DetermineBonds(mol)
+    # except Exception as e:
+    #     logger.error(f"Fail to determine the bonds by the DetermineBonds function for the cif file: {file_path}")
+    #     return None
+    
+    # # Get the RDKit Mol object.
+    # mol = mol.GetMol()
+
+    # return mol
                
 
 
