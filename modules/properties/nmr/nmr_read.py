@@ -296,7 +296,10 @@ def nmr_read_df(atom_df, pair_df, mol_name):
     # Get the atom-level NMR parameters
     num_atoms = len(atom_df)
     shift = np.array(atom_df['shift'], dtype=np.float64)
-    shift_var = np.array(atom_df['shift_var'], dtype=np.float64)
+    try:
+        shift_var = np.array(atom_df['shift_var'], dtype=np.float64)
+    except:
+        shift_var = np.zeros(len(atom_df['shift']), dtype=np.float64)
 
     if not (shift.ndim == 1 and shift_var.ndim == 1):
         logger.error(f"Shift and shift variance arrays should be one-dimensional for molecule {mol_name}!")
@@ -314,7 +317,11 @@ def nmr_read_df(atom_df, pair_df, mol_name):
     i = np.array(pair_df['atom_index_0'], dtype=np.int32)
     j = np.array(pair_df['atom_index_1'], dtype=np.int32)
     coupling = np.array(pair_df['coupling'], dtype=np.float64)
-    coupling_var = np.array(pair_df['coupling_var'], dtype=np.float64)
+    try:
+        coupling_var = np.array(pair_df['coupling_var'], dtype=np.float64)
+    except:
+        coupling_var = np.zeros(len(pair_df['coupling']), dtype=np.float64)
+
     coupling_types = np.array(pair_df['nmr_types'], dtype=str)
     
     coupling_mat[i, j] = coupling
