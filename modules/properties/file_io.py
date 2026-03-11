@@ -10,6 +10,7 @@ from EMS.modules.properties.structure.rdkit_structure_read import sdf_to_rdmol
 from EMS.modules.properties.structure.rdkit_structure_read import xyz_to_rdmol
 from EMS.modules.properties.structure.rdkit_structure_read import mol2_to_rdmol
 from EMS.modules.properties.structure.rdkit_structure_read import dataframe_to_rdmol
+from EMS.modules.properties.structure.rdkit_structure_read import dataframe_to_rdmol_bond_order
 from EMS.modules.properties.structure.rdkit_structure_read import cif_to_rdmol
 from EMS.modules.properties.structure.rdkit_structure_read import structure_arrays_to_rdmol_NoConn
 from EMS.modules.properties.nmr.nmr_read import nmr_read_sdf
@@ -89,7 +90,6 @@ def assign_rdmol_name(rdmol, mol_id=None, extra_name=None):
         rdmol.SetProp("_Name", name_order[0])
 
     return rdmol
-
 
 def file_to_rdmol(file, mol_id=None, streamlit=False):
     '''
@@ -305,11 +305,21 @@ def file_to_rdmol(file, mol_id=None, streamlit=False):
 
         # Get the RDKit molecule object from the atom dataframe
         try:
-            rdmol = dataframe_to_rdmol(atom_df, pair_df,mol_name=mol_name)
-        except:
-            logger.error(f"Fail to read RDKit molecule from the atom dataframe")
-            raise ValueError(f"Fail to read RDKit molecule from the atom dataframe")
-        
+            rdmol = dataframe_to_rdmol(atom_df,mol_name=mol_name)
+            #valency_check
+            for atom in rdmol.GetAtoms():
+                try:
+                    if atom.GetImplicitValence() != 0:
+                        raise
+                except:
+                    raise
+        except Exception as e:
+            try: 
+                rdmol = dataframe_to_rdmol_bond_order(atom_df,pair_df,mol_name=mol_name)
+            except Exception as f:
+                logger.error(f"Fail to read RDKit molecule from the atom and pair dataframes \n{e}\n{f}")
+                raise ValueError(f"Fail to read RDKit molecule from the atom and pair dataframes \n{e}\n{f}")
+            
         # Assign the molecule name in the atom dataframe to both the RDKit molecule object and the official name for the EMS molecule
         rdmol.SetProp("_Name", mol_name)
         official_name = mol_name

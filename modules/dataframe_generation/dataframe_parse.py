@@ -17,7 +17,6 @@ def make_atoms_df(ems_list, write=False, format="pickle"):
     conns = []
     atom_props = []
     smiles = []
-    print(ems_list[0].atom_properties.keys())
     for propname in ems_list[0].atom_properties.keys():
         atom_props.append([])
 
